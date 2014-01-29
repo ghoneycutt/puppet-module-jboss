@@ -1,0 +1,41 @@
+#!/bin/bash
+
+#
+# Managed by puppet, do no modify by hand.
+#
+
+#
+# Version 1.0 - arboeglin - initial version
+# Version 1.1 - arboeglin - changed to only do one instance. Handles the console.log as well.
+#
+
+#Days to keep before zipping
+unzip_days=<%= @log_unzip_days %>
+
+#Gzipped Days to keep
+max_age=<%= @log_age %>
+
+
+#--------- Jboss Config --------------
+#Space seperated path to look for jboss logs
+jboss_path="/usr/local/jboss/server/<%= @instancename %>/log/"
+
+#Jboss log format
+jboss_files="*.log.*"
+#--------------------------------------
+
+if [ ! -e "${jboss_path}/console.log.$(date +%Y%m%d)" ]; then
+    cp "${jboss_path}/console.log" "${jboss_path}/console.log.$(date +%Y%m%d)"
+    chown <%= scope.lookupvar('jboss::user') %>:<%= scope.lookupvar('jboss::user') %> "${jboss_path}/console.log.$(date +%Y%m%d)"
+    echo "" > "${jboss_path}/console.log"
+fi
+
+for jbp in ""$jboss_path""; do
+        if [ -d "$jbp" ]; then
+        for jbf in "$jboss_files"; do
+                echo "Running Find in $jbp on $jbf"
+                /usr/bin/find $jbp -maxdepth 1 -type f -a -name "$jbf" -a -not -name "*.gz" -a -mtime +$unzip_days -print -exec gzip -9 {} \;
+                /usr/bin/find $jbp -maxdepth 1 -type f -a -name "$jbf.gz" -a -mtime +$max_age -print -exec /bin/rm -f {} \;
+         done
+        fi
+done

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- This file is being maintained by Puppet. -->
+<!-- DO NOT EDIT -->
+
+<!-- ===================================================================== -->
+<!--                                                                       -->
+<!--  JBoss Datasource Configuration                                       -->
+<!--                                                                       -->
+<!-- ===================================================================== -->
+
+<datasources>
+  <% for @dsname in @datasources -%><% for @ds in @all_datasources -%><% if @ds['name'] == @dsname -%> 
+  <local-tx-datasource>
+    <jndi-name><%= @ds['name'] -%></jndi-name>
+<% if @ds['type'] == "oracle" -%>
+      <connection-url><%= @ds['uri'] -%></connection-url>
+<% end -%>
+<% if @ds['type'] == "mssql" -%>
+        <connection-url>jdbc:sqlserver://<%= @ds['hostname'] -%>:<%= @ds['port'] -%>;databaseName=<%= @ds['dbname'] -%></connection-url>
+<% end -%>
+<% if @ds['type'] == "oracle" -%>
+    <driver-class>oracle.jdbc.driver.OracleDriver</driver-class>
+<% end -%>
+<% if @ds['type'] == "mssql" -%>
+    <driver-class>com.microsoft.sqlserver.jdbc.SQLServerDriver</driver-class>
+<% end -%>
+    <user-name><%= @ds['username'] -%></user-name>
+    <password><%= @ds['password'] -%></password>
+<% if @ds['type'] == "oracle" -%>
+    <exception-sorter-class-name>org.jboss.resource.adapter.jdbc.vendor.OracleExceptionSorter</exception-sorter-class-name>
+      <metadata>
+         <type-mapping>Oracle9i</type-mapping>
+      </metadata>
+<% end -%>
+<% if @ds['type'] == "mssql" -%>
+      <check-valid-connection-sql>SELECT 1 FROM sysobjects</check-valid-connection-sql>
+
+      <metadata>
+         <type-mapping>MSSQLSERVER2008</type-mapping>
+      </metadata>
+<% end -%>
+  </local-tx-datasource>
+<% end -%><% end -%><% end -%>
+</datasources>

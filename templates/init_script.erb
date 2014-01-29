@@ -1,0 +1,222 @@
+#!/bin/sh
+#
+# This is jboss service startup script.
+#
+# chkconfig: 345 95 10
+# description: starts the Jboss server instances
+#
+
+ID=`id -u`
+
+if [ ! $ID -eq 0 ]; then
+	echo "You must be root to start Jboss."
+	exit 1
+fi
+
+set -e
+trap "echo Failure, exit on error." ERR
+
+. /etc/profile.d/java.sh
+
+# ------- Configure JBoss Variables Here -------
+
+# Jboss Install Location
+JBOSS_HOME="<%= scope.lookupvar('jboss::base_dir') %>"
+
+# Server Name from <%= scope.lookupvar('jboss::apps_dir') %>
+JBOSS_SERVER_NAME="<%= @name %>"
+
+# IP Address to run Jboss on
+# Leave blank for all
+JBOSS_HOST="<%= scope.lookupvar(@listen_ip_fact) %>"
+
+# Where to send console output
+JBOSS_CONSOLE="<%= @real_console_log %>"
+
+# User to run jboss ass
+JBOSSUS="<%= scope.lookupvar('jboss::user') %>"
+
+# Jboss JNDI Port for stopping
+# Leave blank for default
+JBOSS_JNDI_PORT=<%= @jndi_port %>
+
+# Additional Startup Options
+JBOSS_OTHER_OPTS="<%= @jboss_other_options %>"
+
+# Sleep time in seconds.
+ITERATIONSLEEP=0.5
+# Treshold before kill -9
+ITERATIONSBEFOREKILLING=60
+
+# Jboss Run configuration File, unset to use default.
+export RUN_CONF="<%= scope.lookupvar('jboss::base_dir') %>/bin/<%= @name %>.run.conf"
+
+# ------- End Configuration -------
+#
+# If you're editing below here and not fixing the script, you're doing it wrong.
+#
+
+# Define where jboss is - this is the directory containing
+# directories log, bin, conf etc.
+JBOSS_HOME=${JBOSS_HOME:-"/usr/local/jboss"}
+if [ ! -d "${JBOSS_HOME}" ]; then
+	echo "JBOSS_HOME is not a directory: ${JBOSS_HOME}"
+	exit 1
+fi
+JBOSS_SERVER_PATH="${JBOSS_HOME}/server/${JBOSS_SERVER_NAME}"
+
+# Add java path.
+JAVAPTH=${JAVAPTH:-"/usr/local/jdk/bin"}
+
+# Define the user under which jboss.
+if [ "x${RUNASIS}" != "x" ]; then
+	JBOSSUS=${USER}
+	SUBIT="eval"
+else
+	JBOSSUS=${JBOSSUS:-"jboss"}
+	SUBIT="su ${JBOSSUS} -c "
+fi
+
+# Define the classpath for the shutdown class.
+JBOSSCP=${JBOSSCP:-"${JBOSS_HOME}/bin/shutdown.sh -s jnp://${JBOSS_HOST:-"0.0.0.0"}:${JBOSS_JNDI_PORT:-"1099"}"}
+# Define the script to use to start jboss.
+JBOSSSH=${JBOSSSH:-"${JBOSS_HOME}/bin/run.sh -b ${JBOSS_HOST:-"0.0.0.0"} -c ${JBOSS_SERVER_NAME} $JBOSS_OTHER_OPTS"}
+
+# Define start and stop commands.
+CMD_START="${JBOSSSH}"
+CMD_STOP="${JBOSSCP}"
+
+
+# Set PATH.
+if [ -z "`echo ${PATH} | grep ${JAVAPTH}`" ]; then
+	export PATH=${PATH}:${JAVAPTH}
+fi
+
+# Funcionalities functions.
+handleConsoleLog() {
+	if [ "x${JBOSS_CONSOLE}" != "x" ] &&
+		[ "x${JBOSS_CONSOLE}" != "x/dev/null" ]; then
+		if [ ! -d `dirname ${JBOSS_CONSOLE}` ]; then
+			${SUBIT} "mkdir `dirname ${JBOSS_CONSOLE}`"
+		fi
+		if [ -f ${JBOSS_CONSOLE} ]; then
+			# Rotate old console log.
+			${SUBIT} "mv ${JBOSS_CONSOLE} ${JBOSS_CONSOLE}.`date +%s`"
+		fi
+		${SUBIT} "touch ${JBOSS_CONSOLE}"
+	else
+		# Default is to ignore.
+		echo "Warning. Java stdout messages are wrote to /dev/null"
+		echo "    This makes debugging of certain problems nearly impossible."
+		echo "    To get rid of this message set JBOSS_CONSOLE in init script"
+		echo "    which should be a path to console log or /dev/null"
+		JBOSS_CONSOLE="/dev/null"
+	fi
+}
+
+startFunction() {
+	if isAlreadyRunning; then
+		echo "The jboss partition ${JBOSS_SERVER_NAME} is already running; pid ${JAVA_PIDS}"
+	else
+		echo "Starting: ${JBOSSSH}"
+		# Make sure there is no trash in cache.
+		${SUBIT} "rm -rf ${JBOSS_SERVER_PATH}/{data,tmp,work}/"
+
+		handleConsoleLog
+
+		cd ${JBOSS_HOME}/bin
+		if [ "x${SUBIT}" = "xeval" ]; then
+			eval ${CMD_START} < /dev/null >${JBOSS_CONSOLE} 2>&1 &
+		else
+			${SUBIT} "${CMD_START} < /dev/null >${JBOSS_CONSOLE} 2>&1 &"
+		fi
+
+		sleep 15
+
+		ps -fu ${JBOSSUS} | grep "java" | grep ${JBOSS_SERVER_NAME} | grep -v "grep"  > /dev/null 2>&1 || {
+			echo "There has been an error starting Jboss server instance $JBOSS_SERVER_NAME, please check the logs."
+			exit 1
+		}
+
+		echo "======================================================================"
+		echo "Jboss server instance $JBOSS_SERVER_NAME has been started."
+		echo "Jboss server instance $JBOSS_SERVER_NAME will write logs to $JBOSS_CONSOLE"
+		echo "======================================================================"
+	fi
+}
+
+stopFunction() {
+	if isAlreadyRunning; then
+		echo "Stopping: ${JBOSSSH}"
+		set +e
+
+		cd ${JBOSS_HOME}/bin
+
+		if [ -z "${SUBIT}" ]; then
+			${CMD_STOP} &
+		else
+			${SUBIT} "${CMD_STOP}" &
+		fi
+		set -e
+		COUNT=0
+		while isAlreadyRunning; do
+			if [ ${COUNT} -eq 0 ]; then
+				printf "Waiting to shutdown."
+			fi
+			sleep ${ITERATIONSLEEP}
+			let COUNT=COUNT+1
+			printf "."
+			if [ ${COUNT} -ge ${ITERATIONSBEFOREKILLING} ]; then
+				echo " killing with signal 9."
+				kill -9 ${JAVA_PIDS}
+				COUNT=0
+			fi
+		done
+		printf "\n"
+	else
+		echo "The jboss partition ${JBOSS_SERVER_NAME} is not running."
+	fi
+}
+
+
+isAlreadyRunning() {
+	JAVA_PIDS=`ps -fu ${JBOSSUS} | grep "java" | grep -e "${JBOSS_SERVER_NAME}$" -e " ${JBOSS_SERVER_NAME} " | grep -v "grep" | awk '{print $2}'`
+	if [ "x${JAVA_PIDS}" = "x" ]; then
+		return 1
+	else
+		return 0
+	fi
+}
+
+
+ARG=$1
+
+[ -z "$ARG" ] && ARG=usage
+
+case $ARG in
+	start)
+		startFunction
+	;;
+	stop)
+		stopFunction
+	;;
+	restart)
+		stopFunction
+		startFunction
+	;;
+	status)
+		if isAlreadyRunning; then
+			echo "The jboss partition ${JBOSS_SERVER_NAME} is already running; pid ${JAVA_PIDS}"
+      exit 0
+		else
+			echo "The jboss partition ${JBOSS_SERVER_NAME} is not running."
+      exit 1
+		fi
+	;;
+	*)
+		echo "Usage: ${0} (stop|start|restart|status)"
+		exit 1
+	;;
+esac
+
+exit 0

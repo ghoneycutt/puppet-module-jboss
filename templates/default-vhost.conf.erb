@@ -1,0 +1,20 @@
+# This file is being maintained by Puppet.
+# DO NOT EDIT
+
+<VirtualHost <%= scope.lookupvar(@listen_ip_fact) %>:80>
+  ServerName <%= @servername %>
+  ServerAlias <%= @server_default_alias %><% if @serveraliases %><% @serveraliases.each do |serveralias| %> <%= serveralias %><% end -%><% end -%>
+
+  ServerAdmin <%= @serveradmin %>
+
+  ProxyPass <%= @proxy_path %> http://<%= scope.lookupvar(@listen_ip_fact) %>:<%= @http_port %><%= @sub_path %><% if @sub_path != '/' %>/<% end %><% if @proxy_timeout %> timeout=<%= @proxy_timeout %><% end %>
+  ProxyPassReverse <%= @proxy_path %> http://<%= scope.lookupvar(@listen_ip_fact) %>:<%= @http_port %><% if @sub_path != '/' %><%= @sub_path %><% end -%>/<% if @proxy_timeout %> timeout=<%= @proxy_timeout %><% end %>
+  ProxyPreserveHost On
+
+  <% if @extra_apache_config -%>
+      <%= extra_apache_config.gsub(/HTTPD-PERCENT-WORKAROUND/, '%') %>
+  <% end %>
+
+  ErrorLog <%= scope.lookupvar('jboss::apache_log_path') %>/<%= @instancename %>_error.log
+  CustomLog <%= scope.lookupvar('jboss::apache_log_path') %>/<%= @instancename %>_access.log combined
+</VirtualHost>
